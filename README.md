@@ -21,7 +21,7 @@ go run main.go
 ```
 
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"Email":"rober@test.com"}' http://localhost:8081/signup | jq -r .
+curl -X POST -H "Content-Type: application/json" -d '{"Name":"Rober", "Email":"rober15@test.com", "Password": "rober", "Role":"Admin"}' http://localhost:8081/signup | jq -r .
 ```
 
 ```
@@ -33,3 +33,6 @@ DELETE from users;
 ```
 SELECT * FROM USERS WHERE email = 'rober1@test.com' ORDER BY id LIMIT 1;
 ```
+
+```
+curl -X POST -H "Content-Type: application/json" -d '{"Name":"Rober", "Email":"rober15@test.com", "Role":"Admin", "Password":"rober"}' http://localhost:8081/signin | jq -r .

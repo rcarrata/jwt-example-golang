@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -204,13 +203,17 @@ func SignUp(w http.ResponseWriter, r *http.Request) {
 // stored in the database. After compares the values from input and output and if its ok,
 // generates a Golang JWT authentication
 func SignIn(w http.ResponseWriter, r *http.Request) {
+	// Connect to the Database
 	connection := GetDatabase()
+
+	// Defer the close of the Database to the end of the
 	defer Closedatabase(connection)
 
 	// Read from Request Body the auth input email and pass and store it in a Struct Authentication
 	var authdetails Authentication
 	err := json.NewDecoder(r.Body).Decode(&authdetails)
-	// TODO: Add logrus to handle the logs output
+
+	// Raise an error if the Body is not well formatted or if have not the proper structure
 	if err != nil {
 		var err Error
 		err = SetError(err, "Error in reading body")
@@ -221,7 +224,50 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authuser := User{}
+	// Check the email that the User sends when sends the request, and it's stored in the Authentication struct defined before
 	connection.Where("email = ?", authdetails.Email).First(&authuser)
+
+	// If the User/Email is empty represents that the email introduced are not present into the database.
+	if authuser.Email == "" {
+		var err Error
+		err = SetError(err, "Your email is not registered. Please first do the signup!")
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		json.NewEncoder(w).Encode(err)
+		return
+	}
+
+	logrus.Info("Authdetails - User Request", authdetails.Password)
+	logrus.Info("AuthUser - DB Stored", authuser.Password)
+	// authdetails struct storing values from the User request to the API
+	check := CheckPass(authdetails.Password, authuser.Password)
+
+	// Check if the bool of the return err from the CheckPass is nil
+	if !check {
+		var err Error
+		err = SetError(err, "Username or Password is incorrect. Please review them!")
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		json.NewEncoder(w).Encode(err)
+		return
+	}
+
+	// Generate the JWT Token using the Email from the authuser Email and Roles stored into the DB
+	validToken, err := GenerateJWT(authuser.Email, authuser.Role)
+	if err != nil {
+		var err Error
+		err = SetError(err, "Failed to generate the token")
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		json.NewEncoder(w).Encode(err)
+		return
+	}
+
+	// Initialize a empty Token struct in a variable token
+	token := Token{}
+	token.Email = authuser.Email
+	token.Role = authuser.Role
+	token.TokenString = validToken
+	logrus.Info("Super Token", token.TokenString)
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	json.NewEncoder(w).Encode(token.TokenString)
 
 }
 
@@ -241,17 +287,22 @@ func SetError(err Error, message string) Error {
 // Generate Password from a Hash
 func GeneratePass(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
-	// fmt.Println(string(bytes))
+	// logrus.Println(string(bytes))
 	return string(bytes), err
 }
 
 func CheckPass(password string, hash string) bool {
+	// CompareHashAndPassword compares a bcrypt hashed password with its possible plaintext equivalent.
+	// Returns nil on success, or an error on failure.
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	if err != nil {
-		fmt.Println("Error during the Check Hash Password")
-	}
+	// If it's OK, set the error to bool nil / empty
 	return err == nil
 }
+
+// JWT are divided in three separated elements:
+// - Header: consists in two parts (JWT + Signign Algorithm) in json format, encoded in base64url
+// - Payload: contains the Claims (usually the user) and other additional data
+// - Signature: result of Header + Payload encoded, a secret, the signing algorithm and signing the Header + Payload
 
 // Generate JWT Token based in the email and in the role
 func GenerateJWT(email string, role string) (string, error) {
@@ -259,23 +310,34 @@ func GenerateJWT(email string, role string) (string, error) {
 	// Add the signingkey and convert it to an array of bytes
 	signingKey := []byte(secretkey)
 
-	// Generate a token by HS256
+	// Generate a token with the HS256 as the Signign Method
 	token := jwt.New(jwt.SigningMethodHS256)
 	logrus.Info("JWT Token:", token)
 
+	// jwt library defines a struct with the MapClaims for define the different claims
+	// to include in our token payload content in key-value format
 	claims := token.Claims.(jwt.MapClaims)
 
+	// TODO: Explore the token.jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims("key": "value")}
+
+	// Adding to the claims Map, authorized, the email, role and exp
 	claims["authorized"] = true
 	claims["email"] = email
 	claims["role"] = role
 	claims["exp"] = time.Now().Add(time.Minute * 30).Unix()
 
+	// Sign the token with the signingkey defined in the step before
 	tokenStr, err := token.SignedString(signingKey)
 	if err != nil {
 		logrus.Fatalln("Error during the Signing Token:", err.Error())
 		return "", err
 	}
+	// For debugging purposes
+	logrus.Println("Token Signed: ", tokenStr)
+
 	return tokenStr, err
+
+	// TODO: add Parser Token to increase the security purposes
 }
 
 // Main entry point function
