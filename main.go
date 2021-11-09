@@ -14,6 +14,8 @@ import (
 	"github.com/jinzhu/gorm"
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
+
+	logrus "github.com/sirupsen/logrus"
 )
 
 // -- GLOBAL VARS --
@@ -55,28 +57,25 @@ type Error struct {
 // Connect to the Postgresql Database
 // TODO: Use Viper and .Env to handle the psql parameters
 func GetDatabase() *gorm.DB {
-	databasename := "userdb"
 	database := "postgres"
 	databasepassword := "1312"
-	databaseurl := "postgres://postgres:" + databasepassword + "@localhost/" + databasename + "?sslmode=disable"
+	databaseurl := "postgres://postgres:" + databasepassword + "@localhost/" + database + "?sslmode=disable"
 
 	connection, err := gorm.Open(database, databaseurl)
+	sqldb := connection.DB()
+
+	// Check the Database URL
 	if err != nil {
-		log.Fatalln("wrong database url")
+		logrus.Fatalln("Wrong database url")
 	}
-	if err != nil {
-		log.Fatalf("Error in connect the DB %v", err)
+
+	// Check the connection towards the Postgresql
+	if err := sqldb.Ping(); err != nil {
+		logrus.Fatalln("Error in make ping the DB " + err.Error())
 		return nil
 	}
-	if err := connection.DB().Ping(); err != nil {
-		log.Fatalln("Error in make ping the DB " + err.Error())
-		return nil
-	}
-	if connection.Error != nil {
-		log.Fatalln("Any Error in connect the DB " + err.Error())
-		return nil
-	}
-	log.Println("DB connected")
+
+	logrus.Info("DB connected")
 	return connection
 
 }
@@ -91,6 +90,7 @@ func InitialMigration() {
 
 // Close the database connection opened
 func Closedatabase(connection *gorm.DB) {
+	// Only for debug
 	// log.Println("Closing DB connection")
 	sqldb := connection.DB()
 	sqldb.Close()
@@ -102,7 +102,7 @@ func CreateRecord(db *gorm.DB) {
 	result := db.Create(&user)
 
 	if result.Error != nil {
-		log.Fatalln("Not able to generate the record")
+		logrus.Fatalln("Not able to generate the record")
 	}
 }
 
@@ -111,7 +111,7 @@ func QueryRecord(db *gorm.DB, user User) {
 	result := db.First(&user)
 
 	if result.Error != nil {
-		log.Println("Not record present")
+		logrus.Println("Not record present")
 	}
 }
 
@@ -130,7 +130,7 @@ func InitializeRoute() {
 
 func StartServer() {
 	port := ":" + os.Getenv("PORT")
-	fmt.Printf("Server running in port %s", port)
+	logrus.Info("Server running in port ", port)
 	//err := http.ListenAndServe(port, handlers.CORS(handlers.AllowCredentials))
 
 	err := http.ListenAndServe(port, handlers.CORS(handlers.AllowedHeaders([]string{"X-Requested-With", "Access-Control-Allow-Origin", "Content-Type", "Authorization"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"}), handlers.AllowedOrigins([]string{"*"}))(router))
@@ -157,18 +157,25 @@ func SignUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Define a empty struct for the User
 	loginuser := User{}
+
 	// Retrieve the first matched record of a User (struct) in the database and compare it
 	// with the user.Email that was sent in the POST request Body.
 	// Use the Where GORM sentence for
 	// Gorm Conditionals: https://gorm.io/docs/query.html#String-Conditions
+
+	// Select first matched record email == user.Email() and store the result into the User{} struct
+	// If the select is empty, the user/email is not present and you can create it
 	connection.Where("email = ?", user.Email).First(&loginuser)
 
-	fmt.Println(loginuser.Email)
 	// Check if the Email is already registered or not
 	// If the output of the struct loginuser have NOT the Email empty after the Where clause
 	// the email is already repeated
 	if loginuser.Email != "" {
+		// For debugging purposes
+		logrus.Println("The User:", loginuser.Email, "with Password:", loginuser.Password)
+
 		err := Error{}
 		err = SetError(err, "Email already in use")
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -176,16 +183,19 @@ func SignUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logrus.Println("Generating the Password for user", user.Email)
+
 	// Update to the user.Password param in struct the generated password
 	user.Password, err = GeneratePass(user.Password)
 	if err != nil {
-		log.Fatalln("error in password generation hash")
+		logrus.Fatalln("Error in password generation hash")
 	}
-	fmt.Println("Password", user.Password)
+	logrus.Println("Password: ", user.Password)
 
 	// Create a new user with the struct of the User updated
 	connection.Create(&user)
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	// Return the request with the User struct
 	json.NewEncoder(w).Encode(user)
 
 }
@@ -205,6 +215,7 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 		var err Error
 		err = SetError(err, "Error in reading body")
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		// Create a decoder with the request body and call the decode method with the pointer of the struct
 		json.NewEncoder(w).Encode(err)
 		return
 	}
@@ -216,7 +227,7 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 
 // Home Page Handler
 func homeHandler(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Welcome to the Home Page [No Auth Required]"))
+	w.Write([]byte("Welcome to the Home Page [No Auth Required]\n"))
 }
 
 // -- HELPER FUNCTIONS --
@@ -250,7 +261,7 @@ func GenerateJWT(email string, role string) (string, error) {
 
 	// Generate a token by HS256
 	token := jwt.New(jwt.SigningMethodHS256)
-	fmt.Sprintf("JWT Token: %s", token)
+	logrus.Info("JWT Token:", token)
 
 	claims := token.Claims.(jwt.MapClaims)
 
@@ -261,7 +272,7 @@ func GenerateJWT(email string, role string) (string, error) {
 
 	tokenStr, err := token.SignedString(signingKey)
 	if err != nil {
-		fmt.Errorf("Error during the Signing Token: %s", err.Error())
+		logrus.Fatalln("Error during the Signing Token:", err.Error())
 		return "", err
 	}
 	return tokenStr, err
