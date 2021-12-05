@@ -223,6 +223,7 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Authuser struct defined to store values from the DB
 	authuser := User{}
 	// Check the email that the User sends when sends the request, and it's stored in the Authentication struct defined before
 	connection.Where("email = ?", authdetails.Email).First(&authuser)
@@ -236,8 +237,8 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logrus.Info("Authdetails - User Request", authdetails.Password)
-	logrus.Info("AuthUser - DB Stored", authuser.Password)
+	logrus.Info("Authdetails - User Request: ", authdetails.Password)
+	logrus.Info("AuthUser - DB Stored: ", authuser.Password)
 	// authdetails struct storing values from the User request to the API
 	check := CheckPass(authdetails.Password, authuser.Password)
 
@@ -262,10 +263,14 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 
 	// Initialize a empty Token struct in a variable token
 	token := Token{}
+	// Define the email and role that is stored in the DB
 	token.Email = authuser.Email
 	token.Role = authuser.Role
+	// Define the TokenString with the value of the Token generated
 	token.TokenString = validToken
-	logrus.Info("Super Token", token.TokenString)
+	logrus.Info("Generated JWT Token: ", token.TokenString)
+
+	// Send the TokenString generated back to the user as response of the signin
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	json.NewEncoder(w).Encode(token.TokenString)
 
@@ -304,7 +309,9 @@ func CheckPass(password string, hash string) bool {
 // - Payload: contains the Claims (usually the user) and other additional data
 // - Signature: result of Header + Payload encoded, a secret, the signing algorithm and signing the Header + Payload
 
-// Generate JWT Token based in the email and in the role
+// Generate JWT Token based in the email and in the role as input. Creates a token by the algorithm signing method (HS256) and adds authorized email,
+// role, and exp into claims.
+// Claims are pieces of info added into the tokens.
 func GenerateJWT(email string, role string) (string, error) {
 
 	// Add the signingkey and convert it to an array of bytes
@@ -312,19 +319,26 @@ func GenerateJWT(email string, role string) (string, error) {
 
 	// Generate a token with the HS256 as the Signign Method
 	token := jwt.New(jwt.SigningMethodHS256)
-	logrus.Info("JWT Token:", token)
+	// logrus.Info("JWT Token: ", token) // Debug purposes
 
 	// jwt library defines a struct with the MapClaims for define the different claims
 	// to include in our token payload content in key-value format
 	claims := token.Claims.(jwt.MapClaims)
 
 	// TODO: Explore the token.jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims("key": "value")}
+	// https://pkg.go.dev/github.com/golang-jwt/jwt@v3.2.2+incompatible#example-New-Hmac
 
 	// Adding to the claims Map, authorized, the email, role and exp
 	claims["authorized"] = true
 	claims["email"] = email
 	claims["role"] = role
 	claims["exp"] = time.Now().Add(time.Minute * 30).Unix()
+
+	// To Debug Claims
+	// logrus.Println("claims auth", claims["authorized"])
+	// logrus.Println("claims email", claims["email"])
+	// logrus.Println("claims role", claims["role"])
+	// logrus.Println("claims time", claims["exp"])
 
 	// Sign the token with the signingkey defined in the step before
 	tokenStr, err := token.SignedString(signingKey)
