@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -17,14 +18,14 @@ import (
 	logrus "github.com/sirupsen/logrus"
 )
 
-// -- GLOBAL VARS --
+// ------- GLOBAL VARS -------
 
 var (
 	router    *mux.Router
 	secretkey string = "secretkeyjwt"
 )
 
-// -- STRUCTS --
+// ------- STRUCTS -------
 // User store User details
 type User struct {
 	gorm.Model
@@ -52,7 +53,7 @@ type Error struct {
 	Message string `json:"message"`
 }
 
-// -- DATABASE FUNCTIONS --
+// ------- DATABASE FUNCTIONS -------
 // Connect to the Postgresql Database
 // TODO: Use Viper and .Env to handle the psql parameters
 func GetDatabase() *gorm.DB {
@@ -114,17 +115,129 @@ func QueryRecord(db *gorm.DB, user User) {
 	}
 }
 
-// -- ROUTES --
+// ------- MIDDLEWARE FUNCTIONS -------
+
+// isAuthOk returns a handler that executes some logic,
+// and then calls the next handler.
+
+func isAuthOk(handler http.HandlerFunc) http.HandlerFunc {
+
+	// this middleware function uses an anonymous function to simplify
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		if r.Header["Token"] == nil {
+			var err Error
+			err = SetError(err, "No Token Found")
+			// Returns to the http response the Err struct in json format encoded
+			json.NewEncoder(w).Encode(err)
+		}
+
+		// Define the SigningKey var and convert this secretkey into byte
+		var newSigningKey = []byte(secretkey)
+
+		// Received Token from the Header when the request is performed
+		receivedToken := r.Header["Token"][0]
+		logrus.Println(receivedToken)
+
+		// Parsing and Validating the token received in the request using the HMAC signing method
+		// https://pkg.go.dev/github.com/golang-jwt/jwt@v3.2.2+incompatible#Parse
+		token, err := jwt.Parse(receivedToken, func(token *jwt.Token) (interface{}, error) {
+
+			// Parse takes the token string and a function for looking up the key. The latter is especially
+			// useful if you use multiple keys for your application.
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				// Validate the Token and return an error if the signing token is not the proper one
+				// TODO: change fmt -> logrus
+				return nil, fmt.Errorf("unexpected signing method: %v in token of type: %v", token.Header["alg"], token.Header["typ"])
+			}
+
+			// logrus.Println(token.Header["alg"])
+			// logrus.Println(token.Header["typ"])
+			return newSigningKey, nil
+		})
+
+		// If the token Parser have an error the Token is considered as Expired
+		// TODO: Improve with the jwt.ValidationErrorMalformed
+		if err != nil {
+			var err Error
+			err = SetError(err, "Your Token has been expired")
+			// Returns to the http response the Err struct in json format encoded
+			json.NewEncoder(w).Encode(err)
+			return
+		}
+
+		// claims are actually a map[string]interface{}
+		// Check if the token provided is Valid
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			logrus.Println("Token is Valid")
+			logrus.Println(claims["role"])
+			if claims["role"] == "admin" {
+				logrus.Println("Assigned Token role to Admin")
+				r.Header.Set("Role", "admin")
+				handler.ServeHTTP(w, r)
+				return
+			} else if claims["role"] == "user" {
+				logrus.Println("Assigned Token role to User")
+				r.Header.Set("Role", "user")
+				handler.ServeHTTP(w, r)
+				return
+			} else {
+				var err Error
+				err = SetError(err, "Role Not Authorized.")
+				// Returns to the http response the Err struct in json format encoded
+				json.NewEncoder(w).Encode(err)
+			}
+		}
+	}
+}
+
+func AdminIndex(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Role") != "admin" {
+		w.Write([]byte("You are not authorized. Admin Only!"))
+		return
+	}
+	w.Write([]byte("Welcome, Admin."))
+}
+
+func UserIndex(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Role") != "user" {
+		w.Write([]byte("Not authorized. User Only!!"))
+		return
+	}
+	w.Write([]byte("Welcome, User."))
+}
+
+// ------- ROUTES -------
 // CreateRouter generates a new instance of Mux Router
 func CreateRouter() {
 	router = mux.NewRouter()
 }
 
+// Home Page Handler (No Auth Required)
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("Welcome to the Home Page [No Auth Required]\n"))
+}
+
+// Time Page Handler (No Auth Required)
+func timeHandler(w http.ResponseWriter, r *http.Request) {
+	tm := time.Now().Format(time.RFC1123)
+	w.Write([]byte("The time is: " + tm))
+}
+
 // InitializeRoute creates handlers for the mux Router to handle
 func InitializeRoute() {
 	router.HandleFunc("/", homeHandler).Methods("GET")
+	router.HandleFunc("/time", timeHandler).Methods("GET")
 	router.HandleFunc("/signup", SignUp).Methods("POST")
 	router.HandleFunc("/signin", SignIn).Methods("POST")
+	router.HandleFunc("/admin", isAuthOk(AdminIndex)).Methods("GET")
+
+	// Option Methods
+	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, Access-Control-Request-Headers, Access-Control-Request-Method, Connection, Host, Origin, User-Agent, Referer, Cache-Control, X-header")
+	})
 }
 
 func StartServer() {
@@ -138,7 +251,7 @@ func StartServer() {
 	}
 }
 
-// -- ROUTES HANDLERS --
+// ------- ROUTES HANDLERS -------
 
 func SignUp(w http.ResponseWriter, r *http.Request) {
 	connection := GetDatabase()
@@ -276,12 +389,7 @@ func SignIn(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// Home Page Handler
-func homeHandler(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Welcome to the Home Page [No Auth Required]\n"))
-}
-
-// -- HELPER FUNCTIONS --
+// ------- HELPER FUNCTIONS -------
 
 func SetError(err Error, message string) Error {
 	err.IsError = true
