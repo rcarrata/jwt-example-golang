@@ -1,10 +1,10 @@
 FROM golang:1.17 as build
-WORKDIR /rck-auth
+WORKDIR /jwt-practice
 COPY main.go .
 COPY go.mod .
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+RUN CGO_ENABLED=0 GOOS=linux go build -installsuffix cgo -o ./app .
 
 FROM scratch
-COPY --from=0 /rck-auth/app .
+COPY --from=0 /jwt-practice/app .
 EXPOSE 8080
 CMD ["/app"]
