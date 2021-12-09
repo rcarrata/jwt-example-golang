@@ -160,8 +160,9 @@ func isAuthOk(handler http.HandlerFunc) http.HandlerFunc {
 		// TODO: Improve with the jwt.ValidationErrorMalformed
 		if err != nil {
 			var err Error
-			err = SetError(err, "Your Token has been expired")
+			err = SetError(err, "Your JWT Token is wrong or is expired")
 			// Returns to the http response the Err struct in json format encoded
+			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(err)
 			return
 		}
@@ -182,16 +183,21 @@ func isAuthOk(handler http.HandlerFunc) http.HandlerFunc {
 				handler.ServeHTTP(w, r)
 				return
 			} else {
-				var err Error
-				err = SetError(err, "Role Not Authorized.")
+				// If the role is not admin or user, send 403 status code Unauthorized
+				var reserr Error
+				reserr = SetError(reserr, "Role Not Authorized.")
 				// Returns to the http response the Err struct in json format encoded
-				json.NewEncoder(w).Encode(err)
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(reserr)
+				return
 			}
 		}
+
 	}
 }
 
 func AdminIndex(w http.ResponseWriter, r *http.Request) {
+	logrus.Println("Role -> ", r.Header.Get("Role"))
 	if r.Header.Get("Role") != "admin" {
 		w.Write([]byte("You are not authorized. Admin Only!"))
 		return
@@ -200,6 +206,7 @@ func AdminIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func UserIndex(w http.ResponseWriter, r *http.Request) {
+	logrus.Println("Role -> ", r.Header.Get("Role"))
 	if r.Header.Get("Role") != "user" {
 		w.Write([]byte("Not authorized. User Only!!"))
 		return
@@ -231,6 +238,7 @@ func InitializeRoute() {
 	router.HandleFunc("/signup", SignUp).Methods("POST")
 	router.HandleFunc("/signin", SignIn).Methods("POST")
 	router.HandleFunc("/admin", isAuthOk(AdminIndex)).Methods("GET")
+	router.HandleFunc("/user", isAuthOk(AdminIndex)).Methods("GET")
 
 	// Option Methods
 	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
