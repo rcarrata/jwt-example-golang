@@ -55,13 +55,17 @@ type Error struct {
 
 // ------- DATABASE FUNCTIONS -------
 // Connect to the Postgresql Database
-// TODO: Use Viper and .Env to handle the psql parameters
+// TODO: Use Viper handle the psql parameters
 func GetDatabase() *gorm.DB {
-	database := "postgres"
-	databasepassword := "1312"
-	databaseurl := "postgres://postgres:" + databasepassword + "@localhost/" + database + "?sslmode=disable"
+	db_name := getEnv("DB_NAME", "postgres")
+	db_pass := getEnv("DB_PASS", "1312")
+	db_host := getEnv("DB_HOST", "127.0.0.1")
 
-	connection, err := gorm.Open(database, databaseurl)
+	databaseurl := "postgres://postgres:" + db_pass + "@" + db_host + "/" + db_name + "?sslmode=disable"
+
+	fmt.Println(databaseurl)
+
+	connection, err := gorm.Open(db_name, databaseurl)
 	sqldb := connection.DB()
 
 	// Check the Database URL
@@ -78,6 +82,16 @@ func GetDatabase() *gorm.DB {
 	logrus.Info("DB connected")
 	return connection
 
+}
+
+// This helper function check if the env variable is empty, and if it's empty
+// then assigns the fallback / default variable defined for each variable
+func getEnv(key, fallback string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		value = fallback
+	}
+	return value
 }
 
 // Add the InitialMigration for the DB
