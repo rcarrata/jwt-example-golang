@@ -213,6 +213,7 @@ func isAuthOk(handler http.HandlerFunc) http.HandlerFunc {
 func AdminIndex(w http.ResponseWriter, r *http.Request) {
 	logrus.Println("Role -> ", r.Header.Get("Role"))
 	if r.Header.Get("Role") != "admin" {
+		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte("You are not authorized. Admin Only!"))
 		return
 	}
@@ -222,6 +223,7 @@ func AdminIndex(w http.ResponseWriter, r *http.Request) {
 func UserIndex(w http.ResponseWriter, r *http.Request) {
 	logrus.Println("Role -> ", r.Header.Get("Role"))
 	if r.Header.Get("Role") != "user" {
+		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte("Not authorized. User Only!!"))
 		return
 	}
@@ -252,7 +254,7 @@ func InitializeRoute() {
 	router.HandleFunc("/signup", SignUp).Methods("POST")
 	router.HandleFunc("/signin", SignIn).Methods("POST")
 	router.HandleFunc("/admin", isAuthOk(AdminIndex)).Methods("GET")
-	router.HandleFunc("/user", isAuthOk(AdminIndex)).Methods("GET")
+	router.HandleFunc("/user", isAuthOk(UserIndex)).Methods("GET")
 
 	// Option Methods
 	router.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
